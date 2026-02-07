@@ -1,0 +1,9 @@
+node_modules/
+.env
+*.db
+*.db-wal
+*.db-shm
+data/backups/
+data/debug/
+data/scrape-errors.json
+data/scrape-progress.json

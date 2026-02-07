@@ -1,0 +1,28 @@
+{
+  "name": "grocery-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Grocery shopping agent — New World New Lynn product catalog with FTS + vector search",
+  "scripts": {
+    "db:init": "node db/init.js",
+    "db:backup": "node db/backup.js",
+    "db:migrate": "node db/migrate.js",
+    "scrape:categories": "node scraper/scrape-categories.js",
+    "scrape:products": "node scraper/scrape-products.js",
+    "normalise": "node scraper/normalise-products.js",
+    "embed": "node scraper/embed-products.js",
+    "rescrape": "node scraper/rescrape.js",
+    "search": "node search.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7",
+    "openai": "^4.77.0",
+    "sqlite-vec": "^0.1.6"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  }
+}

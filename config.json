@@ -1,0 +1,27 @@
+{
+  "database": {
+    "path": "data/grocery.db"
+  },
+  "scraper": {
+    "delayMin": 4000,
+    "delayMax": 8000,
+    "retries": 3,
+    "retryBackoff": 10000,
+    "headless": false,
+    "navigationTimeout": 30000,
+    "cloudflareWait": 15000,
+    "productsPerPage": 20
+  },
+  "embedding": {
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "batchSize": 100
+  },
+  "backup": {
+    "maxBackups": 5
+  },
+  "store": {
+    "baseUrl": "https://www.newworld.co.nz",
+    "name": "New World New Lynn"
+  }
+}

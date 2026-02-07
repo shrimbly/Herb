@@ -39,6 +39,7 @@ function initSchema() {
         last_price REAL,
         last_price_change TEXT,
         last_scraped TEXT,
+        has_embedding INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )

@@ -13,12 +13,18 @@ function buildEmbeddingText(product) {
 export async function embedProducts() {
   const db = getDb();
 
+  // Ensure tracking column exists
+  try {
+    db.exec('ALTER TABLE products ADD COLUMN has_embedding INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    // Column already exists
+  }
+
   // Find products that don't have embeddings yet
   const products = db.prepare(`
-    SELECT p.id, p.name, p.brand, p.generic_name, p.category, p.subcategory
-    FROM products p
-    LEFT JOIN vec_products v ON v.product_id = p.id
-    WHERE v.product_id IS NULL
+    SELECT id, name, brand, generic_name, category, subcategory
+    FROM products
+    WHERE has_embedding = 0
   `).all();
 
   console.log(`Found ${products.length} products needing embeddings.`);
@@ -30,8 +36,9 @@ export async function embedProducts() {
   }
 
   const insertVec = db.prepare(`
-    INSERT INTO vec_products (product_id, embedding) VALUES (?, ?)
+    INSERT INTO vec_products (product_id, embedding) VALUES (CAST(? AS INTEGER), ?)
   `);
+  const markEmbedded = db.prepare(`UPDATE products SET has_embedding = 1 WHERE id = ?`);
 
   const batchSize = config.embedding.batchSize;
   let embedded = 0;
@@ -54,6 +61,7 @@ export async function embedProducts() {
           const embedding = response.data[j].embedding;
           const buffer = new Float32Array(embedding).buffer;
           insertVec.run(batch[j].id, Buffer.from(buffer));
+          markEmbedded.run(batch[j].id);
           embedded++;
         }
       })();
@@ -63,7 +71,7 @@ export async function embedProducts() {
     }
   }
 
-  const totalVec = db.prepare('SELECT COUNT(*) as count FROM vec_products').get().count;
+  const totalVec = db.prepare('SELECT COUNT(*) as count FROM products WHERE has_embedding = 1').get().count;
   const totalProducts = db.prepare('SELECT COUNT(*) as count FROM products').get().count;
 
   console.log(`\nEmbedding complete.`);

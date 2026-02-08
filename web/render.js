@@ -466,11 +466,7 @@ function showSelection(stepIdx) {
     document.getElementById('next-btn').addEventListener('click', function() { advanceStep(); });
   };
 
-  if (!el.classList.contains('hidden')) {
-    fadeSwap(el, build);
-  } else {
-    build();
-  }
+  build();
 }
 
 function bindCardClicks(container, itemIdx) {

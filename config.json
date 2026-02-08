@@ -23,5 +23,14 @@
   "store": {
     "baseUrl": "https://www.newworld.co.nz",
     "name": "New World New Lynn"
+  },
+  "preferences": {
+    "autoResolveThreshold": 0.6,
+    "learnMinPurchases": 3,
+    "learnDominanceThreshold": 0.6
+  },
+  "ai": {
+    "model": "gpt-4o-mini",
+    "temperature": 0.2
   }
 }

@@ -1,8 +1,8 @@
 {
   "name": "grocery-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Grocery shopping agent — New World New Lynn product catalog with FTS + vector search",
+  "description": "Grocery shopping agent — New World New Lynn product catalog with FTS + vector search, recipes, preferences, and shopping lists",
   "scripts": {
     "db:init": "node db/init.js",
     "db:backup": "node db/backup.js",
@@ -12,7 +12,25 @@
     "normalise": "node scraper/normalise-products.js",
     "embed": "node scraper/embed-products.js",
     "rescrape": "node scraper/rescrape.js",
-    "search": "node search.js"
+    "search": "node search.js",
+    "pref:set": "node preferences/set-preference.js",
+    "pref:get": "node preferences/get-preference.js",
+    "pref:learn": "node preferences/learn-from-history.js",
+    "pref:wizard": "node preferences/wizard.js",
+    "recipe:add": "node recipes/add-recipe.js",
+    "recipe:search": "node recipes/search-recipes.js",
+    "recipe:parse-text": "node recipes/parse-text.js",
+    "recipe:parse-ig": "node recipes/parse-instagram.js",
+    "recipe:parse-screenshot": "node recipes/parse-screenshot.js",
+    "recipe:update": "node recipes/update-recipe.js",
+    "recipe:link": "node recipes/link-ingredients.js",
+    "list:build": "node lists/build-list.js",
+    "list:update": "node lists/update-list.js",
+    "history:parse": "node history/parse-order.js",
+    "history:match": "node history/match-items.js",
+    "history:frequency": "node history/update-frequency.js",
+    "history:scrape": "node history/scrape-orders.js",
+    "cart:add": "node cart/add-to-cart.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

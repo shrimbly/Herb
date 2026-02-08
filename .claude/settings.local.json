@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:www.newworld.co.nz)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.firecrawl.dev)",
+      "WebFetch(domain:firecrawl.dev)",
+      "WebFetch(domain:alexgarcia.xyz)",
+      "WebFetch(domain:platform.openai.com)",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}

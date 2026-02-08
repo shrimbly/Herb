@@ -55,7 +55,9 @@ app.post('/api/checkout', async (c) => {
 
   const needsConfirmation = session.items.filter(i => !i.autoConfirmed).length;
 
-  const baseUrl = new URL(c.req.url).origin;
+  const proto = c.req.header('x-forwarded-proto') || new URL(c.req.url).protocol.slice(0, -1);
+  const host = c.req.header('host') || new URL(c.req.url).host;
+  const baseUrl = `${proto}://${host}`;
 
   return c.json({
     sessionId: session.id,

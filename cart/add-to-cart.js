@@ -5,7 +5,8 @@ import { launchBrowser, navigateWithRetry, sleep } from '../scraper/browser.js';
 import { resolveIngredient } from '../lib/resolve.js';
 
 const BASE_URL = config.store.baseUrl;
-const CART_API = 'https://api-prod.newworld.co.nz/v1/edge/cart';
+const API_BASE = 'https://api-prod.newworld.co.nz';
+const CART_API = `${API_BASE}/v1/edge/cart`;
 
 function prompt(question) {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -31,6 +32,76 @@ function toApiProductId(nwProductId) {
 function getSaleType(nwProductId) {
   if (nwProductId.includes('_kgm_')) return 'WEIGHT';
   return 'UNITS';
+}
+
+/**
+ * Attempt automated login with stored credentials.
+ * Returns true if login succeeded, false if manual login needed.
+ */
+async function loginWithCredentials(page) {
+  const email = config.nwEmail;
+  const password = config.nwPassword;
+
+  if (!email || !password) {
+    console.log('No NW_EMAIL/NW_PASSWORD in .env — manual login required.');
+    return false;
+  }
+
+  try {
+    console.log('Attempting automated login...');
+
+    // Find email/username field — try broad set of selectors
+    const emailField = page.locator([
+      'input[type="email"]',
+      'input[name="email"]',
+      'input[name="username"]',
+      'input[name="emailAddress"]',
+      'input[autocomplete="email"]',
+      'input[autocomplete="username"]',
+    ].join(', ')).first();
+    await emailField.waitFor({ timeout: 5000 });
+    await emailField.fill(email);
+
+    // Fill password
+    await page.locator('input[type="password"]').first().fill(password);
+    await sleep(500);
+
+    // Find submit button — try multiple strategies
+    const submitBtn = page.locator([
+      'button[type="submit"]',
+      'input[type="submit"]',
+    ].join(', ')).or(
+      page.getByRole('button', { name: /sign in|log in|login|submit/i })
+    ).first();
+    await submitBtn.click();
+
+    // Wait for login to complete — password field disappears after successful auth
+    await page.waitForFunction(
+      () => !document.querySelector('input[type="password"]'),
+      { timeout: 20000 }
+    );
+    await sleep(2000);
+
+    console.log('Login successful.');
+    return true;
+  } catch (err) {
+    console.log(`Automated login failed: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Wait for login to complete by polling for the password field to disappear.
+ */
+async function waitForLoginComplete(page, timeoutMs = 120000) {
+  console.log('  Waiting for login to complete in browser...');
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const hasPassword = await page.evaluate(() => !!document.querySelector('input[type="password"]'));
+    if (!hasPassword) return true;
+    await sleep(2000);
+  }
+  return false;
 }
 
 /**
@@ -83,10 +154,11 @@ async function extractBearerToken(page) {
 
 /**
  * Add products to the NW cart via API.
+ * Uses Playwright's context.request to bypass CORS (browser fetch fails on cross-origin POST).
  * products: [{ apiProductId, quantity, saleType }]
- * Returns the API response.
+ * Returns { status, data }.
  */
-async function addToCartApi(page, token, products) {
+async function addToCartApi(context, token, products) {
   const payload = {
     products: products.map(p => ({
       productId: p.apiProductId,
@@ -95,22 +167,21 @@ async function addToCartApi(page, token, products) {
     })),
   };
 
-  // Use the browser's fetch to make the API call (inherits cookies/session)
-  const result = await page.evaluate(async ({ url, token, payload }) => {
-    const res = await fetch(url, {
-      method: 'POST',
+  try {
+    const res = await context.request.post(CART_API, {
       headers: {
-        'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      data: payload,
     });
 
     const data = await res.json();
-    return { status: res.status, data };
-  }, { url: CART_API, token, payload });
-
-  return result;
+    return { status: res.status(), data };
+  } catch (err) {
+    console.error(`  Cart API error: ${err.message}`);
+    return { status: 0, data: {} };
+  }
 }
 
 /**
@@ -157,7 +228,7 @@ async function resolveItems(db, items) {
  * Main pipeline: resolve items, show confirmation, add to cart.
  * items: [{ name, qty }]
  */
-export async function addToCart(items) {
+export async function addToCart(items, { keepOpen = false } = {}) {
   const db = getDb();
 
   // Step 1: Resolve items to products
@@ -172,16 +243,21 @@ export async function addToCart(items) {
   for (const r of resolved) {
     if (r.resolved) {
       const p = r.product;
+      const saleType = getSaleType(p.nw_product_id);
+      const isWeight = saleType === 'WEIGHT';
       const lineTotal = (p.price || 0) * r.qty;
       estimatedTotal += lineTotal;
       const size = p.unit_size ? ` (${p.unit_size})` : '';
+      const unit = isWeight ? '/kg' : ' ea';
+      const qtyLabel = isWeight ? `${r.qty}kg` : `x${r.qty}`;
       const src = r.source === 'preference' ? ' *' : '';
-      console.log(`  + ${r.name} x${r.qty} -> ${p.name}${size} — $${p.price?.toFixed(2) || '?'} ea${src}`);
+      console.log(`  + ${r.name} ${qtyLabel} -> ${p.name}${size} — $${p.price?.toFixed(2) || '?'}${unit}${src}`);
       toAdd.push({
         apiProductId: toApiProductId(p.nw_product_id),
         saleType: getSaleType(p.nw_product_id),
         quantity: r.qty,
         name: p.name,
+        price: p.price,
         dbName: r.name,
       });
     } else {
@@ -221,23 +297,29 @@ export async function addToCart(items) {
   try {
     // Navigate to orders page to trigger login
     await navigateWithRetry(page, `${BASE_URL}/shop/my-account/myorders`);
-    await sleep(2000);
+    await sleep(3000);
 
-    const onAccountPage = await page.evaluate(() => {
-      return window.location.href.includes('/my-account');
-    });
+    // Check for login form (password field) rather than URL — NW keeps /my-account in URL even on login page
+    const needsLogin = await page.evaluate(() => !!document.querySelector('input[type="password"]'));
 
-    if (!onAccountPage) {
-      console.log('\n========================================');
-      console.log('  Please log in to your New World');
-      console.log('  account in the browser window.');
-      console.log('========================================\n');
+    if (needsLogin) {
+      // Try automated login first, fall back to manual
+      const loggedIn = await loginWithCredentials(page);
 
-      await prompt('Press ENTER once you have logged in...');
-      await sleep(2000);
+      if (!loggedIn) {
+        console.log('\n========================================');
+        console.log('  Please log in to your New World');
+        console.log('  account in the browser window.');
+        console.log('  (will auto-detect when done)');
+        console.log('========================================\n');
 
-      await navigateWithRetry(page, `${BASE_URL}/shop/my-account/myorders`);
-      await sleep(2000);
+        const detected = await waitForLoginComplete(page);
+        if (!detected) {
+          throw new Error('Login timed out — please try again.');
+        }
+        console.log('Login detected.');
+        await sleep(2000);
+      }
     } else {
       console.log('Already logged in.');
     }
@@ -245,41 +327,59 @@ export async function addToCart(items) {
     // Extract Bearer token
     console.log('Extracting auth token...');
     const token = await extractBearerToken(page);
-    console.log('Token acquired.\n');
+    console.log('Token acquired.');
+
+    // Set store via API — POST /v1/edge/cart/store/{storeId}
+    if (config.store.id) {
+      const storeName = config.store.name || config.store.id;
+      console.log(`Setting store to ${storeName}...`);
+      const storeRes = await context.request.post(
+        `${API_BASE}/v1/edge/cart/store/${config.store.id}`,
+        { headers: { 'Authorization': `Bearer ${token}` } }
+      );
+      if (storeRes.status() === 200) {
+        console.log(`  Store set to ${storeName}.`);
+      } else {
+        console.log(`  Warning: store change returned ${storeRes.status()}`);
+      }
+    }
 
     // Add to cart — try as a single batch first, fall back to individual on error
     let added = 0;
     let failed = 0;
 
-    console.log(`Adding ${toAdd.length} item(s) to cart...`);
-    const batchResult = await addToCartApi(page, token, toAdd);
+    console.log(`\nAdding ${toAdd.length} item(s) to cart...`);
+    const batchResult = await addToCartApi(context, token, toAdd);
 
     if (batchResult.status === 200) {
-      // Batch succeeded
+      // Batch succeeded — report using our item names (API returns full cart, not just added items)
       const data = batchResult.data;
-      for (const p of data.products || []) {
-        console.log(`  + ${p.name} x${p.quantity} — $${(p.price / 100).toFixed(2)}`);
-        added++;
-      }
-      for (const u of data.unavailableProducts || []) {
-        console.log(`  x ${u.productId} — unavailable`);
-        failed++;
+      const unavailIds = new Set((data.unavailableProducts || []).map(u => u.productId));
+      for (const item of toAdd) {
+        if (unavailIds.has(item.apiProductId)) {
+          console.log(`  x ${item.name} — unavailable`);
+          failed++;
+        } else {
+          const unit = item.saleType === 'WEIGHT' ? 'kg' : '';
+          console.log(`  + ${item.name} x${item.quantity}${unit} — $${item.price?.toFixed(2) || '?'}`);
+          added++;
+        }
       }
     } else {
       // Batch failed — retry each item individually so one bad item doesn't sink the rest
       console.log(`  Batch failed (${batchResult.status}), retrying individually...`);
 
       for (const item of toAdd) {
-        const result = await addToCartApi(page, token, [item]);
+        const result = await addToCartApi(context, token, [item]);
 
         if (result.status === 200) {
-          const p = result.data.products?.[0];
-          if (p) {
-            console.log(`  + ${p.name} x${p.quantity} — $${(p.price / 100).toFixed(2)}`);
-            added++;
-          } else if (result.data.unavailableProducts?.length) {
+          if (result.data.unavailableProducts?.some(u => u.productId === item.apiProductId)) {
             console.log(`  x ${item.name} — unavailable`);
             failed++;
+          } else {
+            const unit = item.saleType === 'WEIGHT' ? 'kg' : '';
+            console.log(`  + ${item.name} x${item.quantity}${unit} — $${item.price?.toFixed(2) || '?'}`);
+            added++;
           }
         } else {
           console.log(`  x ${item.name} — API error (${result.status})`);
@@ -297,6 +397,11 @@ export async function addToCart(items) {
     if (unresolved.length) console.log(`  Unresolved: ${unresolved.length}`);
     console.log(`========================================\n`);
 
+    if (keepOpen) {
+      console.log('Browser left open for inspection. Press Ctrl+C to exit.');
+      await new Promise(() => {}); // hang until killed
+    }
+
     return { added, failed, unresolved: unresolved.length };
   } finally {
     await browser.close();
@@ -309,7 +414,8 @@ export async function addToCart(items) {
 //   echo '[{"name":"chicken thighs","qty":1},{"name":"mince","qty":2}]' | node cart/add-to-cart.js
 //   node cart/add-to-cart.js "chicken thighs" "broccoli" "2x mince" "milk"
 if (process.argv[1]?.includes('add-to-cart')) {
-  const args = process.argv.slice(2);
+  const keepOpen = process.argv.includes('--keep-open');
+  const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
 
   if (args.length > 0) {
     // Parse CLI arguments: "2x mince" → { name: "mince", qty: 2 }
@@ -319,7 +425,7 @@ if (process.argv[1]?.includes('add-to-cart')) {
       return { name: arg.trim(), qty: 1 };
     });
 
-    addToCart(items).catch(err => {
+    addToCart(items, { keepOpen }).catch(err => {
       console.error('Failed:', err.message);
       process.exit(1);
     });

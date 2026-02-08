@@ -32,5 +32,8 @@
   "ai": {
     "model": "gpt-4o-mini",
     "temperature": 0.2
+  },
+  "server": {
+    "sessionTtl": 1800000
   }
 }

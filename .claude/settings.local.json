@@ -8,7 +8,10 @@
       "WebFetch(domain:firecrawl.dev)",
       "WebFetch(domain:alexgarcia.xyz)",
       "WebFetch(domain:platform.openai.com)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "Bash(curl:*)",
+      "Bash(node server.js:*)",
+      "Bash(netstat:*)"
     ]
   }
 }

@@ -30,17 +30,19 @@
     "history:match": "node history/match-items.js",
     "history:frequency": "node history/update-frequency.js",
     "history:scrape": "node history/scrape-orders.js",
-    "cart:add": "node cart/add-to-cart.js"
+    "cart:add": "node cart/add-to-cart.js",
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.9",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
+    "hono": "^4.11.8",
     "openai": "^4.77.0",
-    "sqlite-vec": "^0.1.6"
-  },
-  "devDependencies": {
     "playwright": "^1.49.1",
     "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "sqlite-vec": "^0.1.6"
   }
 }

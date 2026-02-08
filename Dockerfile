@@ -13,6 +13,8 @@ COPY . .
 # Data volume mount point
 RUN mkdir -p /app/data
 
+ENV HEADLESS=true
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

@@ -18,9 +18,10 @@ try {
 }
 
 export async function launchBrowser() {
-  const browser = await chromium.launch({
-    headless: scraperConfig.headless,
-  });
+  const headless = process.env.HEADLESS !== undefined
+    ? process.env.HEADLESS !== 'false'
+    : scraperConfig.headless;
+  const browser = await chromium.launch({ headless });
 
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',

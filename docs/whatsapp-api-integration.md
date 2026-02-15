@@ -151,10 +151,10 @@ whatsapp/send.js — format + send responses via Cloud API
 
 **Response sender** (`whatsapp/send.js`):
 - Text messages (with markdown-like WhatsApp formatting: `*bold*`, `_italic_`)
-- Interactive list messages (up to 10 sections, 10 rows each)
-- Interactive reply buttons (up to 3 buttons)
-- Product messages (link to WhatsApp catalog)
-- Template messages (for proactive notifications like "your cart is ready")
+- Interactive list messages (up to 10 sections, 10 rows each) — for recipe search results, product lists
+- Interactive reply buttons (up to 3 buttons) — "Review Cart", "Yes/No" confirmations
+- URL button messages — link out to checkout page with preview text
+- Template messages (for proactive notifications like "your cart is ready", "order confirmed")
 
 #### New env vars:
 ```
@@ -165,45 +165,62 @@ WHATSAPP_APP_SECRET=
 WHATSAPP_VERIFY_TOKEN=
 ```
 
-### 6. WhatsApp Native Product Catalog
+### 6. Custom Checkout Web UI (kept, upgraded)
 
-The WhatsApp Business Platform supports **product catalogs** natively — users can browse products, view images and prices, and add to cart without leaving WhatsApp.
+The existing checkout web UI (`web/render.js`, `web/session.js`, `web/routes/checkout.js`) is the **primary** product selection and cart confirmation interface. WhatsApp's native catalog/cart UI is too limited — capped at 10 sections of 10 items, no control over layout, no ability to show multiple alternatives per ingredient with confidence scores.
 
-#### Catalog Sync (`whatsapp/catalog-sync.js`):
-- Sync products from SQLite → WhatsApp Commerce Manager catalog via the Catalog API
-- Map fields: name, price, image_url, description, category → WhatsApp catalog item schema
-- Handle the 500-item limit per catalog message (paginate if needed)
-- Delta sync: only push changed products
-- Schedule: after each NW product feed sync
+The current checkout page already provides:
+- Product cards with images, prices, and unit pricing
+- Radio selection between multiple candidates per ingredient
+- Confidence badges and resolution strategy labels
+- SSE-driven real-time progress during cart submission
+- Estimated total with live updates as selections change
 
-#### Product Messages:
-- When user searches for a product, return results as WhatsApp **Single Product Message** or **Multi Product Message**
-- User taps product → sees full detail with image, price, description
-- User taps "Add to Cart" → item added to WhatsApp native cart
+#### What changes in the checkout flow:
 
-### 7. WhatsApp Native Cart + Order Flow
-
-With the WhatsApp cart API, the checkout flow becomes:
-
+**Current flow:**
 ```
-User searches "milk" in WhatsApp
+OpenClaw agent calls POST /api/checkout → creates session
     ↓
-Herb returns product results as Multi Product Message
+Agent sends checkout URL to user via WhatsApp
     ↓
-User taps "Add to Cart" on Anchor Blue Milk 2L
+User opens link in mobile browser → sees checkout page
     ↓
-WhatsApp sends cart update webhook to Herb
+User reviews/swaps products, taps Confirm
     ↓
-User taps "Send Cart" when ready
-    ↓
-Herb receives order webhook with cart contents
-    ↓
-Herb calls NW Cart API to add items to NW online cart
-    ↓
-Herb sends confirmation message with total + NW checkout link
+Playwright launches, logs in, submits cart (slow, fragile)
 ```
 
-This **replaces** the current web UI checkout page (`web/render.js`, `web/session.js`, `web/routes/checkout.js`) for the WhatsApp use case. The web checkout could stay as a fallback or for non-WhatsApp access.
+**New flow:**
+```
+WhatsApp webhook receives "add milk, bread, eggs to cart"
+    ↓
+whatsapp/handlers/cart.js calls POST /api/checkout internally
+    ↓
+Herb sends checkout URL back to user as WhatsApp message
+    (with interactive button: "Review Cart" → opens link)
+    ↓
+User opens link in mobile browser → same checkout page
+    ↓
+User reviews/swaps products, taps Confirm
+    ↓
+lib/nw-cart.js calls official NW Cart API (fast, reliable)
+    ↓
+SSE pushes completion event → page shows "Done"
+    ↓
+Herb sends WhatsApp confirmation message with total + NW checkout link
+```
+
+Key improvements:
+- **No Playwright** in the submission path — `web/cart-submit.js` calls `lib/nw-cart.js` directly instead of launching a browser
+- **WhatsApp interactive button** to open checkout link (better UX than a raw URL in a text message)
+- **Post-submission WhatsApp notification** — user gets a confirmation message even if they've closed the browser tab
+- The checkout page itself needs minimal changes — just the backend submission logic swaps from Playwright to the official API
+
+#### Checkout page enhancements to consider:
+- Mobile-first polish (already monochrome minimal, but test on iPhone/Android WebView)
+- Deep link back to WhatsApp after confirmation (optional)
+- Show NW cart total from the official API (currently estimated from local prices)
 
 ---
 
@@ -212,16 +229,22 @@ This **replaces** the current web UI checkout page (`web/render.js`, `web/sessio
 ```
 ┌──────────────────────────────────────────────┐
 │   WhatsApp (Willie / Wife)                   │
-│   Native catalog, cart, interactive messages  │
+│   Text messages + interactive buttons/lists  │
 └──────────────┬───────────────────────────────┘
                │ Cloud API webhooks
+               │
 ┌──────────────▼───────────────────────────────┐
 │   Herb Server (Hono)                         │
 │                                              │
 │   whatsapp/webhook.js  ← POST /webhook       │
 │   whatsapp/router.js   ← intent dispatch     │
 │   whatsapp/send.js     ← response formatting │
-│   whatsapp/catalog-sync.js ← catalog push    │
+│                                              │
+│   web/* ← checkout UI (primary cart review)  │
+│   ├── routes/checkout.js  (session + API)    │
+│   ├── render.js           (HTML generation)  │
+│   ├── session.js          (session store)    │
+│   └── cart-submit.js      (→ lib/nw-cart.js) │
 │                                              │
 │   Existing modules (unchanged):              │
 │   ├── lib/resolve.js    (ingredient resolver)│
@@ -229,23 +252,22 @@ This **replaces** the current web UI checkout page (`web/render.js`, `web/sessio
 │   ├── lib/ai.js         (embeddings)         │
 │   ├── recipes/*         (recipe management)  │
 │   ├── preferences/*     (brand preferences)  │
-│   ├── lists/*           (shopping lists)      │
-│   ├── history/*         (purchase history)   │
-│   └── web/*             (checkout fallback)  │
+│   ├── lists/*           (shopping lists)     │
+│   └── history/*         (purchase history)   │
 │                                              │
 │   New modules:                               │
 │   ├── lib/nw-auth.js    (OAuth2 client)      │
 │   ├── lib/nw-cart.js    (official cart API)   │
 │   └── catalog/sync.js   (product feed sync)  │
-└──────────────┬───────────────────────────────┘
-               │ Official APIs
-┌──────────────▼───────────────────────────────┐
-│   New World APIs (official)                  │
-│   ├── OAuth2 token endpoint                  │
-│   ├── Product Feed API                       │
-│   ├── Cart API                               │
-│   └── Order History API (if available)       │
-└──────────────────────────────────────────────┘
+└──────┬───────────────────────────┬───────────┘
+       │ Official APIs             │ HTTPS link
+┌──────▼───────────────────┐  ┌───▼──────────────────┐
+│ New World APIs (official)│  │ Mobile Browser        │
+│ ├── OAuth2 token endpoint│  │ Checkout page         │
+│ ├── Product Feed API     │  │ (product selection,   │
+│ ├── Cart API             │  │  confirmation, SSE    │
+│ └── Order History API    │  │  progress)            │
+└──────────────────────────┘  └───────────────────────┘
 ```
 
 ---
@@ -280,17 +302,18 @@ This **replaces** the current web UI checkout page (`web/render.js`, `web/sessio
 
 **Outcome:** Herb talks directly to WhatsApp. OpenClaw dependency removed.
 
-### Phase 3: WhatsApp Commerce (native catalog + cart)
+### Phase 3: Checkout + Notification Polish
 
 | Task | Notes |
 |------|-------|
-| `whatsapp/catalog-sync.js` — push products to WhatsApp catalog | Map NW products → WhatsApp catalog item schema |
-| Product message formatting | Single Product + Multi Product messages |
-| Cart webhook handling | Receive cart/order events from WhatsApp |
-| Cart → NW Cart bridge | When user "sends cart" in WhatsApp, add to NW online cart |
-| Order confirmation messages | Template message with total + checkout link |
+| Refactor `web/cart-submit.js` to use `lib/nw-cart.js` | Replace Playwright submission with direct API call |
+| WhatsApp interactive button for checkout link | "Review Cart" button instead of raw URL |
+| Post-submission WhatsApp notification | Confirmation message with total + NW checkout link after cart is submitted |
+| Message template registration for proactive notifications | Meta requires pre-approved templates for outbound messages |
+| Checkout page mobile polish | Test in iPhone/Android WebView opened from WhatsApp |
+| Optional: deep link back to WhatsApp from checkout page | "Return to chat" link after confirmation |
 
-**Outcome:** Users browse products, add to cart, and check out natively in WhatsApp.
+**Outcome:** Seamless loop — chat in WhatsApp, review in browser, confirmation back in WhatsApp.
 
 ---
 
@@ -339,22 +362,20 @@ This is roughly 70-80% of the codebase. The WhatsApp integration is a new **inte
 
 The tradeoff: Herb now owns NLU (intent classification). This is solvable with GPT-4o-mini, which is already a dependency.
 
-### 2. Keep the checkout web UI?
+### 2. Checkout UI: custom web page (not WhatsApp native cart)
 
-**Recommendation: Keep as fallback.** The WhatsApp native catalog/cart is the primary flow, but the web UI (`/checkout/:id`) is useful for:
-- Non-WhatsApp access (sharing a checkout link)
-- Complex product selection (many alternatives to compare)
-- Debugging and admin use
+**Decision: Keep the custom checkout web UI as the primary product review/confirmation interface.**
 
-### 3. Product catalog sync strategy
+WhatsApp's native commerce features (catalog messages, in-chat cart) are too constrained:
+- Max 10 sections × 10 items per Multi Product Message
+- No way to show multiple candidate products per ingredient with confidence scores
+- No radio selection between alternatives
+- No real-time SSE progress during submission
+- Limited layout control — can't show unit pricing, special badges, strategy labels
 
-**Two options:**
-- **Full mirror**: Sync all ~13,000 NW products to WhatsApp catalog. Allows native product browsing but requires managing a large catalog.
-- **On-demand**: Only push products to WhatsApp when they appear in search results or shopping lists. Smaller catalog, less maintenance, but no native browsing.
+The existing checkout page (`/checkout/:id`) already handles all of this. The WhatsApp integration sends the checkout URL as an interactive button message — user taps it, reviews in their mobile browser, confirms, and gets a WhatsApp notification when it's done.
 
-**Recommendation: On-demand for now.** Sync resolved products (preferences + search results) to WhatsApp catalog as they're used. Full mirror can come later if browsing is a desired UX.
-
-### 4. Conversation state
+### 3. Conversation state
 
 **Options:**
 - SQLite table (consistent with existing data layer)
@@ -400,6 +421,6 @@ The official NW APIs transform Herb from a "scrape-and-automate" system into a c
 
 1. **Transport swap** (Phase 1): Replace Playwright with NW official APIs. This alone makes the existing system dramatically more reliable.
 2. **Interface layer** (Phase 2): Add WhatsApp Cloud API webhook handling to talk directly to WhatsApp instead of through OpenClaw.
-3. **Commerce layer** (Phase 3): Use WhatsApp native catalog and cart for a seamless in-chat shopping experience.
+3. **Checkout polish** (Phase 3): Wire the WhatsApp ↔ checkout web UI loop — interactive buttons to open the checkout page, post-submission notifications back to WhatsApp.
 
-Each phase is independently valuable — Phase 1 can ship without Phase 2 or 3.
+Each phase is independently valuable — Phase 1 can ship without Phase 2 or 3. The custom checkout web UI stays as the primary product review and cart confirmation interface throughout all phases.
